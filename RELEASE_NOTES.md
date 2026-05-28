@@ -1,5 +1,23 @@
 # Release Notes
 
+## v0.2.0
+
+English:
+
+- Fixes usage refresh after the Codex 0.133 app-server update.
+- Uses the newer app-server proxy/daemon path first, with a legacy stdio fallback.
+- Handles the newer multi-bucket `rateLimitsByLimitId` response and prefers the `codex` bucket.
+- Adds a Finder-friendly `Install Auto-Start.command` launcher.
+- Updates LaunchAgent installation to use the modern `launchctl bootstrap` flow.
+
+中文：
+
+- 修复 Codex 0.133 更新后用量刷新失效的问题。
+- 优先使用新版 app-server proxy/daemon 连接方式，并保留旧版 stdio 回退。
+- 兼容新版多桶 `rateLimitsByLimitId` 返回结构，并优先显示 `codex` 用量桶。
+- 新增可在 Finder 里双击运行的 `Install Auto-Start.command` 安装入口。
+- 自动启动安装改为使用较新的 `launchctl bootstrap` 流程。
+
 ## v0.1.0
 
 English:
