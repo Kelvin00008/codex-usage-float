@@ -21,31 +21,12 @@ final class UsageFetcher {
 
     func fetch(completion: @escaping (Result<UsageSnapshot, Error>) -> Void) {
         DispatchQueue.global(qos: .utility).async {
-            let initRequest = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-usage-float","title":"Codex Usage Float","version":"0.1"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}"#
+            let initRequest = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-usage-float","title":"Codex Usage Float","version":"0.2.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}"#
             let readRequest = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read"}"#
-            let command = """
-            (printf '%s\\n' '\(initRequest)'; sleep 0.2; printf '%s\\n' '\(readRequest)'; sleep 6) | "\(self.codexPath)" app-server --listen stdio://
-            """
-
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-lc", command]
-
-            let output = Pipe()
-            let error = Pipe()
-            process.standardOutput = output
-            process.standardError = error
+            let input = "\(initRequest)\n\(readRequest)\n"
 
             do {
-                try process.run()
-                process.waitUntilExit()
-
-                let data = output.fileHandleForReading.readDataToEndOfFile()
-                guard let text = String(data: data, encoding: .utf8), !text.isEmpty else {
-                    let errData = error.fileHandleForReading.readDataToEndOfFile()
-                    let errText = String(data: errData, encoding: .utf8) ?? "No response"
-                    throw NSError(domain: "UsageFetcher", code: 1, userInfo: [NSLocalizedDescriptionKey: errText.trimmingCharacters(in: .whitespacesAndNewlines)])
-                }
+                let text = try self.readRateLimits(input: input)
 
                 guard let snapshot = Self.parseSnapshot(from: text) else {
                     throw NSError(domain: "UsageFetcher", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not read usage data"])
@@ -62,16 +43,98 @@ final class UsageFetcher {
         }
     }
 
+    private func readRateLimits(input: String) throws -> String {
+        var errors: [String] = []
+
+        do {
+            return try runCodex(arguments: ["app-server", "proxy"], input: input, timeout: 8)
+        } catch {
+            errors.append("proxy: \(error.localizedDescription)")
+        }
+
+        _ = try? runCodex(arguments: ["app-server", "daemon", "start"], input: nil, timeout: 6)
+
+        do {
+            return try runCodex(arguments: ["app-server", "proxy"], input: input, timeout: 8)
+        } catch {
+            errors.append("daemon proxy: \(error.localizedDescription)")
+        }
+
+        do {
+            return try runCodex(arguments: ["app-server", "--listen", "stdio://"], input: input, timeout: 8)
+        } catch {
+            errors.append("stdio: \(error.localizedDescription)")
+        }
+
+        throw NSError(
+            domain: "UsageFetcher",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: errors.joined(separator: "\n")]
+        )
+    }
+
+    private func runCodex(arguments: [String], input: String?, timeout: TimeInterval) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: codexPath)
+        process.arguments = arguments
+
+        let output = Pipe()
+        let error = Pipe()
+        process.standardOutput = output
+        process.standardError = error
+
+        let inputPipe: Pipe?
+        if input != nil {
+            let pipe = Pipe()
+            process.standardInput = pipe
+            inputPipe = pipe
+        } else {
+            inputPipe = nil
+        }
+
+        try process.run()
+
+        if let input, let inputPipe {
+            inputPipe.fileHandleForWriting.write(Data(input.utf8))
+            try? inputPipe.fileHandleForWriting.close()
+        }
+
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            group.leave()
+        }
+
+        if group.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            throw NSError(domain: "UsageFetcher", code: 3, userInfo: [NSLocalizedDescriptionKey: "Codex app-server timed out"])
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let errData = error.fileHandleForReading.readDataToEndOfFile()
+        let text = String(data: data, encoding: .utf8) ?? ""
+        let errText = String(data: errData, encoding: .utf8) ?? ""
+
+        if process.terminationStatus != 0 || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let message = errText.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NSError(domain: "UsageFetcher", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message.isEmpty ? "No response" : message])
+        }
+
+        return text
+    }
+
     private static func parseSnapshot(from text: String) -> UsageSnapshot? {
         for line in text.split(separator: "\n").map(String.init) {
             guard let data = line.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let id = object["id"] as? Int,
                   id == 2,
-                  let result = object["result"] as? [String: Any],
-                  let rateLimits = result["rateLimits"] as? [String: Any] else {
+                  let result = object["result"] as? [String: Any] else {
                 continue
             }
+
+            guard let rateLimits = preferredRateLimits(from: result) else { continue }
 
             let planType = (rateLimits["planType"] as? String) ?? "unknown"
             let creditsInfo = rateLimits["credits"] as? [String: Any]
@@ -88,6 +151,21 @@ final class UsageFetcher {
             )
         }
         return nil
+    }
+
+    private static func preferredRateLimits(from result: [String: Any]) -> [String: Any]? {
+        if let byLimitId = result["rateLimitsByLimitId"] as? [String: Any] {
+            if let codex = byLimitId["codex"] as? [String: Any] {
+                return codex
+            }
+
+            let snapshots = byLimitId.values.compactMap { $0 as? [String: Any] }
+            if let withWindows = snapshots.first(where: { $0["primary"] != nil || $0["secondary"] != nil }) {
+                return withWindows
+            }
+        }
+
+        return result["rateLimits"] as? [String: Any]
     }
 
     private static func parseWindow(_ value: [String: Any]?) -> UsageWindow? {
@@ -329,7 +407,8 @@ final class UsageViewController: NSViewController {
                 self.primaryRow.update(with: snapshot.primary)
                 self.secondaryRow.update(with: snapshot.secondary)
                 self.subtitleLabel.stringValue = "\(snapshot.planType) · \(snapshot.credits)"
-            case .failure:
+            case .failure(let error):
+                NSLog("Codex Usage Float refresh failed: \(error.localizedDescription)")
                 self.subtitleLabel.stringValue = "Unavailable"
             }
         }
