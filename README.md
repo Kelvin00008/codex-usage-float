@@ -56,6 +56,8 @@ This installs a user LaunchAgent. It watches for the Codex app every 10 seconds:
 - when Codex is running, the widget starts
 - when Codex quits, the widget closes
 
+You can also double-click `Install Auto-Start.command` in Finder.
+
 ### Remove Auto-Start
 
 ```bash
@@ -123,6 +125,8 @@ CodexUsageFloat.app
 
 - Codex 运行时，自动启动浮窗
 - Codex 退出时，自动关闭浮窗
+
+也可以在 Finder 里双击 `Install Auto-Start.command` 来安装。
 
 ### 取消自动启动
 
