@@ -34,5 +34,7 @@ cat > "$PLIST" <<PLIST
 PLIST
 
 launchctl unload "$PLIST" >/dev/null 2>&1 || true
-launchctl load "$PLIST"
+launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
+launchctl bootstrap "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || launchctl load "$PLIST"
+launchctl enable "gui/$(id -u)/local.codex.usagefloat.monitor" >/dev/null 2>&1 || true
 echo "$PLIST"
