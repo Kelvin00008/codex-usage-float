@@ -8,6 +8,7 @@ English:
 - Stabilizes the popover layout with centered rows and fixed-width progress bars.
 - Adds icon-only popover controls for refresh, restart, and quit.
 - Uses a steadier stdio app-server read path to avoid intermittent `Unavailable` states.
+- Updates README with the latest menu bar screenshot and bilingual benefit summary.
 
 中文：
 
@@ -15,6 +16,7 @@ English:
 - 固定弹窗居中布局和进度条宽度，减少刷新时的跳动。
 - 在弹窗底部新增仅图标显示的刷新、重启、退出按钮。
 - 改用更稳定的 stdio 读取方式，减少偶发 `Unavailable` 状态。
+- 更新 README 截图和中英双语优点说明。
 
 ## v0.3.0
 
