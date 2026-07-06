@@ -21,7 +21,7 @@ final class UsageFetcher {
 
     func fetch(completion: @escaping (Result<UsageSnapshot, Error>) -> Void) {
         DispatchQueue.global(qos: .utility).async {
-            let initRequest = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-usage-float","title":"Codex Usage Float","version":"0.2.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}"#
+            let initRequest = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-usage-float","title":"Codex Usage Float","version":"0.3.1"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}"#
             let readRequest = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read"}"#
             let input = "\(initRequest)\n\(readRequest)\n"
 
@@ -47,6 +47,12 @@ final class UsageFetcher {
         var errors: [String] = []
 
         do {
+            return try runCodexStdioWithDelay(timeout: 10)
+        } catch {
+            errors.append("stdio: \(error.localizedDescription)")
+        }
+
+        do {
             return try runCodex(arguments: ["app-server", "proxy"], input: input, timeout: 8)
         } catch {
             errors.append("proxy: \(error.localizedDescription)")
@@ -60,17 +66,59 @@ final class UsageFetcher {
             errors.append("daemon proxy: \(error.localizedDescription)")
         }
 
-        do {
-            return try runCodex(arguments: ["app-server", "--listen", "stdio://"], input: input, timeout: 8)
-        } catch {
-            errors.append("stdio: \(error.localizedDescription)")
-        }
-
         throw NSError(
             domain: "UsageFetcher",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: errors.joined(separator: "\n")]
         )
+    }
+
+    private func runCodexStdioWithDelay(timeout: TimeInterval) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: codexPath)
+        process.arguments = ["app-server", "--listen", "stdio://"]
+
+        let output = Pipe()
+        let error = Pipe()
+        let inputPipe = Pipe()
+        process.standardOutput = output
+        process.standardError = error
+        process.standardInput = inputPipe
+
+        let initRequest = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-usage-float","title":"Codex Usage Float","version":"0.3.1"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}"# + "\n"
+        let readRequest = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read"}"# + "\n"
+
+        try process.run()
+
+        inputPipe.fileHandleForWriting.write(Data(initRequest.utf8))
+        Thread.sleep(forTimeInterval: 0.35)
+        inputPipe.fileHandleForWriting.write(Data(readRequest.utf8))
+        Thread.sleep(forTimeInterval: 4.0)
+        try? inputPipe.fileHandleForWriting.close()
+
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            group.leave()
+        }
+
+        if group.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            throw NSError(domain: "UsageFetcher", code: 3, userInfo: [NSLocalizedDescriptionKey: "Codex app-server timed out"])
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let errData = error.fileHandleForReading.readDataToEndOfFile()
+        let text = String(data: data, encoding: .utf8) ?? ""
+        let errText = String(data: errData, encoding: .utf8) ?? ""
+
+        if process.terminationStatus != 0 || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let message = errText.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NSError(domain: "UsageFetcher", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message.isEmpty ? "No response" : message])
+        }
+
+        return text
     }
 
     private func runCodex(arguments: [String], input: String?, timeout: TimeInterval) throws -> String {
@@ -207,27 +255,35 @@ final class UsageRow: NSView {
         nameLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         percentLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         resetLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        resetLabel.textColor = .secondaryLabelColor
+        nameLabel.textColor = .white
+        percentLabel.textColor = .white
+        resetLabel.textColor = .white
+        nameLabel.alignment = .center
+        percentLabel.alignment = .center
+        resetLabel.alignment = .center
 
         let top = NSStackView(views: [nameLabel, percentLabel, resetLabel])
         top.orientation = .horizontal
         top.alignment = .centerY
         top.spacing = 5
+        top.distribution = .gravityAreas
         top.setHuggingPriority(.defaultLow, for: .horizontal)
         percentLabel.setContentHuggingPriority(.required, for: .horizontal)
         resetLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         let stack = NSStackView(views: [top, progress])
         stack.orientation = .vertical
+        stack.alignment = .centerX
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            top.widthAnchor.constraint(equalToConstant: 156),
+            progress.widthAnchor.constraint(equalToConstant: 156),
             progress.heightAnchor.constraint(equalToConstant: 4)
         ])
     }
@@ -259,6 +315,10 @@ final class UsageRow: NSView {
     }
 
     private static func formatReset(_ date: Date?) -> String {
+        formatResetForCompact(date)
+    }
+
+    static func formatResetForCompact(_ date: Date?) -> String {
         guard let date else { return "--:--" }
         let calendar = Calendar.current
         let formatter = DateFormatter()
@@ -305,96 +365,271 @@ final class ProgressBarView: NSView {
     }
 }
 
+final class DraggableVisualEffectView: NSVisualEffectView {
+    var onMouseEntered: (() -> Void)?
+    private var tracking: NSTrackingArea?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking {
+            removeTrackingArea(tracking)
+        }
+
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onMouseEntered?()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+}
+
+final class CompactUsageViewController: NSViewController {
+    private let fetcher = UsageFetcher()
+    private let titleLabel = NSTextField(labelWithString: "Codex")
+    private let primaryLabel = NSTextField(labelWithString: "5h --%")
+    private let secondaryLabel = NSTextField(labelWithString: "1w --%")
+    private let resetLabel = NSTextField(labelWithString: "--:--")
+    private let creditLabel = NSTextField(labelWithString: "credit 0")
+    private let refreshLabel = NSTextField(labelWithString: "↻")
+    private var isRefreshing = false
+    var onSnapshot: ((UsageSnapshot) -> Void)?
+    var onFailure: ((Error) -> Void)?
+
+    override func loadView() {
+        let visual = DraggableVisualEffectView(frame: NSRect(x: 0, y: 0, width: 330, height: 28))
+        visual.material = .hudWindow
+        visual.blendingMode = .behindWindow
+        visual.state = .active
+        visual.wantsLayer = true
+        visual.layer?.cornerRadius = 9
+        visual.layer?.masksToBounds = true
+        visual.layer?.borderWidth = 0.6
+        visual.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        visual.onMouseEntered = { [weak self] in
+            self?.refresh()
+        }
+        view = visual
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        buildUI()
+    }
+
+    private func buildUI() {
+        [titleLabel, primaryLabel, secondaryLabel, resetLabel, creditLabel, refreshLabel].forEach {
+            $0.textColor = .labelColor
+            $0.lineBreakMode = .byTruncatingTail
+            $0.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+
+        titleLabel.font = .systemFont(ofSize: 10.5, weight: .semibold)
+        creditLabel.font = .systemFont(ofSize: 9.5, weight: .regular)
+        creditLabel.textColor = .white
+        primaryLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+        secondaryLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+        resetLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        resetLabel.textColor = .white
+        refreshLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        refreshLabel.textColor = .white
+
+        let dot1 = separator()
+        let dot2 = separator()
+        let dot3 = separator()
+        let dot4 = separator()
+
+        let stack = NSStackView(views: [
+            titleLabel,
+            creditLabel,
+            dot1,
+            primaryLabel,
+            dot2,
+            secondaryLabel,
+            dot3,
+            resetLabel,
+            dot4,
+            refreshLabel
+        ])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 5
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -10),
+            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+
+    private func separator() -> NSTextField {
+        let label = NSTextField(labelWithString: "·")
+        label.font = .systemFont(ofSize: 10, weight: .regular)
+        label.textColor = .white
+        return label
+    }
+
+    func refresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        refreshLabel.stringValue = "…"
+
+        fetcher.fetch { [weak self] result in
+            guard let self else { return }
+            self.isRefreshing = false
+            self.refreshLabel.stringValue = "↻"
+            switch result {
+            case .success(let snapshot):
+                self.apply(snapshot)
+                self.onSnapshot?(snapshot)
+            case .failure(let error):
+                NSLog("Codex Usage Float refresh failed: \(error.localizedDescription)")
+                self.primaryLabel.stringValue = "unavailable"
+                self.secondaryLabel.stringValue = ""
+                self.resetLabel.stringValue = ""
+                self.onFailure?(error)
+            }
+        }
+    }
+
+    private func apply(_ snapshot: UsageSnapshot) {
+        titleLabel.stringValue = snapshot.planType.capitalized
+        creditLabel.stringValue = "credit \(snapshot.credits)"
+        primaryLabel.stringValue = formatted(snapshot.primary)
+        secondaryLabel.stringValue = formatted(snapshot.secondary)
+        resetLabel.stringValue = UsageRow.formatResetForCompact(snapshot.primary?.resetAt)
+
+        let remaining = snapshot.primary?.remainingPercent ?? 100
+        primaryLabel.textColor = color(for: remaining)
+    }
+
+    private func formatted(_ window: UsageWindow?) -> String {
+        guard let window else { return "-- --%" }
+        return "\(window.label) \(Int(round(window.remainingPercent)))%"
+    }
+
+    private func color(for remaining: Double) -> NSColor {
+        return .white
+    }
+}
+
 final class UsageViewController: NSViewController {
     private let fetcher = UsageFetcher()
     private let titleLabel = NSTextField(labelWithString: "Codex")
     private let subtitleLabel = NSTextField(labelWithString: "Loading")
     private let primaryRow = UsageRow()
     private let secondaryRow = UsageRow()
-    private let refreshButton = NSButton()
-    private let closeButton = NSButton()
-    private var timer: Timer?
     private var isRefreshing = false
+    var onSnapshot: ((UsageSnapshot) -> Void)?
+    var onFailure: ((Error) -> Void)?
+    var onRestart: (() -> Void)?
+    var onQuit: (() -> Void)?
 
     override func loadView() {
         view = NSVisualEffectView()
+        view.frame = NSRect(x: 0, y: 0, width: 226, height: 172)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         buildUI()
-        refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.refresh()
-        }
     }
 
     private func buildUI() {
         guard let visual = view as? NSVisualEffectView else { return }
-        visual.material = .hudWindow
+        visual.material = .popover
         visual.blendingMode = .behindWindow
         visual.state = .active
         visual.wantsLayer = true
-        visual.layer?.cornerRadius = 18
+        visual.layer?.cornerRadius = 12
         visual.layer?.masksToBounds = true
 
-        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        subtitleLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
-        subtitleLabel.textColor = .secondaryLabelColor
-
-        configureIconButton(refreshButton, symbol: "arrow.clockwise", action: #selector(refreshTapped))
-        configureIconButton(closeButton, symbol: "xmark", action: #selector(closeTapped))
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        subtitleLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        titleLabel.textColor = .white
+        subtitleLabel.textColor = .white
+        titleLabel.alignment = .center
+        subtitleLabel.alignment = .center
 
         let titleStack = NSStackView(views: [titleLabel, subtitleLabel])
         titleStack.orientation = .vertical
+        titleStack.alignment = .centerX
         titleStack.spacing = 2
 
-        let header = NSStackView(views: [titleStack, refreshButton, closeButton])
+        let header = NSStackView(views: [titleStack])
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = 4
         titleStack.setHuggingPriority(.defaultLow, for: .horizontal)
 
-        let stack = NSStackView(views: [header, primaryRow, secondaryRow])
+        let actions = NSStackView(views: [
+            iconButton(symbol: "arrow.clockwise", tooltip: "刷新", action: #selector(refreshTapped)),
+            iconButton(symbol: "arrow.triangle.2.circlepath", tooltip: "重启", action: #selector(restartTapped)),
+            iconButton(symbol: "xmark", tooltip: "退出", action: #selector(quitTapped))
+        ])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 12
+
+        let stack = NSStackView(views: [header, primaryRow, secondaryRow, actions])
         stack.orientation = .vertical
-        stack.spacing = 12
+        stack.alignment = .centerX
+        stack.spacing = 11
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -10),
-            refreshButton.widthAnchor.constraint(equalToConstant: 18),
-            refreshButton.heightAnchor.constraint(equalToConstant: 18),
-            closeButton.widthAnchor.constraint(equalToConstant: 18),
-            closeButton.heightAnchor.constraint(equalToConstant: 18)
+            primaryRow.widthAnchor.constraint(equalToConstant: 180),
+            secondaryRow.widthAnchor.constraint(equalToConstant: 180)
         ])
-
-        let click = NSClickGestureRecognizer(target: self, action: #selector(refreshTapped))
-        view.addGestureRecognizer(click)
     }
 
-    private func configureIconButton(_ button: NSButton, symbol: String, action: Selector) {
-        button.bezelStyle = .regularSquare
+    private func iconButton(symbol: String, tooltip: String, action: Selector) -> NSButton {
+        let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip) ?? NSImage(), target: self, action: action)
         button.isBordered = false
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        button.imagePosition = .imageOnly
-        button.target = self
-        button.action = action
-        button.contentTintColor = .secondaryLabelColor
+        button.bezelStyle = .regularSquare
+        button.contentTintColor = .white
+        button.toolTip = tooltip
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 22),
+            button.heightAnchor.constraint(equalToConstant: 22)
+        ])
+        return button
     }
 
     @objc private func refreshTapped() {
         refresh()
     }
 
-    @objc private func closeTapped() {
-        NSApp.terminate(nil)
+    @objc private func restartTapped() {
+        onRestart?()
     }
 
-    private func refresh() {
+    @objc private func quitTapped() {
+        onQuit?()
+    }
+
+    func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
         subtitleLabel.stringValue = "Refreshing"
@@ -407,56 +642,289 @@ final class UsageViewController: NSViewController {
                 self.primaryRow.update(with: snapshot.primary)
                 self.secondaryRow.update(with: snapshot.secondary)
                 self.subtitleLabel.stringValue = "\(snapshot.planType) · \(snapshot.credits)"
+                self.onSnapshot?(snapshot)
             case .failure(let error):
                 NSLog("Codex Usage Float refresh failed: \(error.localizedDescription)")
                 self.subtitleLabel.stringValue = "Unavailable"
+                self.onFailure?(error)
             }
         }
     }
 }
 
+final class StatusHoverView: NSControl {
+    var onMouseEntered: (() -> Void)?
+    var onMouseExited: (() -> Void)?
+
+    private let imageView = NSImageView()
+    private let textLabel = NSTextField(labelWithString: "Codex")
+    private var tracking: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        wantsLayer = true
+
+        imageView.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "Codex usage")
+        imageView.contentTintColor = .labelColor
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+
+        textLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        textLabel.lineBreakMode = .byTruncatingTail
+        textLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(imageView)
+        addSubview(textLabel)
+
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 15),
+            imageView.heightAnchor.constraint(equalToConstant: 15),
+            textLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 3),
+            textLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            textLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking {
+            removeTrackingArea(tracking)
+        }
+
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onMouseEntered?()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onMouseExited?()
+    }
+
+    func updateTitle(_ title: String, warning: Bool) {
+        textLabel.stringValue = title
+        imageView.contentTintColor = warning ? .systemOrange : .labelColor
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var panel: NSPanel?
+    private let statusItem = NSStatusBar.system.statusItem(withLength: 62)
+    private let popover = NSPopover()
+    private let controller = UsageViewController()
+    private var closeTimer: Timer?
+    private var refreshTimer: Timer?
+    private var trackingArea: NSTrackingArea?
+    private lazy var statusMenu: NSMenu = {
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "刷新", action: #selector(refreshFromMenu), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem(title: "重启", action: #selector(restartFromMenu), keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "退出", action: #selector(quitFromMenu), keyEquivalent: "q"))
+        menu.items.forEach { $0.target = self }
+        return menu
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        let controller = UsageViewController()
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 122, height: 190),
-            styleMask: [.titled, .fullSizeContentView, .resizable, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.contentViewController = controller
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = true
-        panel.isMovableByWindowBackground = true
-        panel.hidesOnDeactivate = false
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
-        panel.minSize = NSSize(width: 108, height: 160)
-        panel.maxSize = NSSize(width: 180, height: 240)
-        panel.setFrameAutosaveName("CodexUsageFloatFrame")
-        panel.standardWindowButton(.closeButton)?.isHidden = true
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        buildStatusItem()
+        buildPopover()
 
-        position(panel: panel)
-        panel.orderFrontRegardless()
-        self.panel = panel
+        controller.onSnapshot = { [weak self] snapshot in
+            self?.updateStatusTitle(with: snapshot)
+        }
+        controller.onFailure = { [weak self] _ in
+            self?.updateStatusButton(title: "--%", warning: true)
+        }
+        controller.onRestart = { [weak self] in
+            self?.restartApp()
+        }
+        controller.onQuit = {
+            NSApp.terminate(nil)
+        }
+
+        updateStatusButton(title: "--%", warning: false)
+        controller.refresh()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.controller.refresh()
+        }
     }
 
-    private func position(panel: NSPanel) {
-        guard let screen = NSScreen.main else { return }
-        let visible = screen.visibleFrame
-        let x = visible.maxX - panel.frame.width - 24
-        let y = visible.maxY - panel.frame.height - 24
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
+    private func buildStatusItem() {
+        statusItem.length = 62
+
+        if let button = statusItem.button {
+            button.imagePosition = .imageOnly
+            button.title = ""
+            button.attributedTitle = NSAttributedString(string: "")
+            button.contentTintColor = .white
+            button.toolTip = "Codex usage: hover to refresh and view details"
+            button.target = self
+            button.action = #selector(statusButtonPressed)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+
+            let area = NSTrackingArea(
+                rect: .zero,
+                options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            button.addTrackingArea(area)
+            trackingArea = area
+        }
+    }
+
+    private func buildPopover() {
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        popover.animates = true
+    }
+
+    private func showAndRefresh() {
+        closeTimer?.invalidate()
+        closeTimer = nil
+
+        if let button = statusItem.button, !popover.isShown {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+
+        controller.refresh()
+    }
+
+    @objc private func statusButtonPressed() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showMenu()
+            return
+        }
+
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            showAndRefresh()
+        }
+    }
+
+    private func showMenu() {
+        closeTimer?.invalidate()
+        closeTimer = nil
+        popover.performClose(nil)
+
+        guard let button = statusItem.button else { return }
+        statusMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY - 4), in: button)
+    }
+
+    @objc private func refreshFromMenu() {
+        showAndRefresh()
+    }
+
+    @objc private func restartFromMenu() {
+        restartApp()
+    }
+
+    private func restartApp() {
+        let appPath = Bundle.main.bundlePath
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 0.3; open \"\(appPath)\""]
+        try? process.run()
+        NSApp.terminate(nil)
+    }
+
+    @objc private func quitFromMenu() {
+        NSApp.terminate(nil)
+    }
+
+    @objc func mouseEntered(with event: NSEvent) {
+        showAndRefresh()
+    }
+
+    @objc func mouseExited(with event: NSEvent) {
+        scheduleClose()
+    }
+
+    private func scheduleClose() {
+        closeTimer?.invalidate()
+        closeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+            self?.popover.performClose(nil)
+        }
+    }
+
+    private func updateStatusTitle(with snapshot: UsageSnapshot) {
+        let remaining = snapshot.primary?.remainingPercent ?? snapshot.secondary?.remainingPercent
+        if let remaining {
+            updateStatusButton(title: "\(Int(round(remaining)))%", warning: remaining <= 30)
+        } else {
+            updateStatusButton(title: "--%", warning: false)
+        }
+    }
+
+    private func updateStatusButton(title: String, warning: Bool) {
+        let image = makeStatusImage(title: title)
+        statusItem.length = image.size.width + 8
+        statusItem.button?.image = image
+        statusItem.button?.title = ""
+        statusItem.button?.attributedTitle = NSAttributedString(string: "")
+        statusItem.button?.contentTintColor = .white
+    }
+
+    private func makeStatusImage(title: String) -> NSImage {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white
+        ]
+        let titleSize = (title as NSString).size(withAttributes: attributes)
+        let width = ceil(18 + 5 + titleSize.width)
+        let size = NSSize(width: width, height: 20)
+        let image = NSImage(size: size)
+
+        image.lockFocus()
+        NSColor.clear.setFill()
+        NSRect(origin: .zero, size: size).fill()
+
+        let iconRect = NSRect(x: 1, y: 3, width: 14, height: 14)
+        NSColor.white.setStroke()
+        let circle = NSBezierPath(ovalIn: iconRect)
+        circle.lineWidth = 1.6
+        circle.stroke()
+
+        NSColor.white.setFill()
+        for point in [
+            NSPoint(x: iconRect.midX - 3.2, y: iconRect.midY + 2.6),
+            NSPoint(x: iconRect.midX + 3.2, y: iconRect.midY + 2.6),
+            NSPoint(x: iconRect.midX - 3.7, y: iconRect.midY - 2.4)
+        ] {
+            NSBezierPath(ovalIn: NSRect(x: point.x - 1.1, y: point.y - 1.1, width: 2.2, height: 2.2)).fill()
+        }
+
+        let needle = NSBezierPath()
+        needle.move(to: NSPoint(x: iconRect.midX, y: iconRect.midY))
+        needle.line(to: NSPoint(x: iconRect.midX + 3.8, y: iconRect.midY - 3.4))
+        needle.lineWidth = 1.4
+        needle.stroke()
+
+        (title as NSString).draw(at: NSPoint(x: 20, y: 2.5), withAttributes: attributes)
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
     }
 }
 

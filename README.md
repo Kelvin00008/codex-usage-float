@@ -4,18 +4,20 @@ English | [中文](#中文)
 
 ## English
 
-Codex Usage Float is a tiny macOS floating widget that shows your current Codex usage limits without opening the account menu.
+Codex Usage Float is a tiny macOS menu bar utility that shows your current Codex usage limits without opening the account menu.
 
 It reads the local Codex app-server method `account/rateLimits/read`, then displays the short-window and weekly-window remaining percentages with reset times. The widget refreshes every 60 seconds and does not send prompts to the model, so it does not consume model tokens.
 
 ### Features
 
-- Apple-style translucent floating panel
-- Always-on-top desktop widget
-- Resizable narrow layout
+- Menu bar usage indicator
+- Hover-to-refresh translucent popover
+- Apple-style translucent usage panel
+- White rendered menu bar badge for better visibility
+- Stable centered popover layout
+- Icon-only popover controls for refresh, restart, and quit
 - Shows remaining usage for the primary and secondary Codex limit windows
 - Shows reset time for each window
-- Low-usage color warning
 - Optional auto-start and auto-close with Codex
 - Source-only Swift/AppKit implementation
 
@@ -74,18 +76,20 @@ You can also double-click `Install Auto-Start.command` in Finder.
 
 ## 中文
 
-Codex Usage Float 是一个很小的 macOS 桌面浮窗，用来实时显示 Codex 当前套餐/用量剩余情况，不用每次点开账户菜单。
+Codex Usage Float 是一个很小的 macOS 状态栏组件，用来快速查看 Codex 当前套餐/用量剩余情况，不用每次点开账户菜单。
 
 它读取 Codex 本地 app-server 的 `account/rateLimits/read` 方法，然后显示短周期窗口和周窗口的剩余百分比与重置时间。浮窗每 60 秒刷新一次，不会向模型发送 prompt，所以不会消耗模型 token。
 
 ### 功能
 
-- 接近苹果毛玻璃风格的半透明浮窗
-- 桌面常驻、置顶显示
-- 窄高布局，可拖动调整大小
+- 状态栏用量指示
+- 鼠标移上去自动刷新并显示毛玻璃弹窗
+- 接近苹果毛玻璃风格的半透明信息面板
+- 白色状态栏徽标，在深色和亮色背景上更容易看清
+- 固定居中的弹窗布局，刷新时不易跳动
+- 弹窗底部提供图标按钮：刷新、重启、退出
 - 显示 Codex 两个用量窗口的剩余百分比
 - 显示每个窗口的重置时间
-- 用量较低时自动变色提醒
 - 可选：随 Codex 打开自动启动，随 Codex 退出自动关闭
 - 使用 Swift/AppKit 编写，无额外前端框架
 

@@ -1,5 +1,35 @@
 # Release Notes
 
+## v0.3.1
+
+English:
+
+- Renders the menu bar badge as a white image so the percentage stays visible on macOS menu bar backgrounds.
+- Stabilizes the popover layout with centered rows and fixed-width progress bars.
+- Adds icon-only popover controls for refresh, restart, and quit.
+- Uses a steadier stdio app-server read path to avoid intermittent `Unavailable` states.
+
+中文：
+
+- 将状态栏徽标渲染为白色图片，避免百分比被 macOS 显示成黑色。
+- 固定弹窗居中布局和进度条宽度，减少刷新时的跳动。
+- 在弹窗底部新增仅图标显示的刷新、重启、退出按钮。
+- 改用更稳定的 stdio 读取方式，减少偶发 `Unavailable` 状态。
+
+## v0.3.0
+
+English:
+
+- Moves the UI into the macOS menu bar.
+- Refreshes usage on hover and shows a compact translucent popover.
+- Removes the always-on-top desktop panel behavior from the main experience.
+
+中文：
+
+- 将组件改为 macOS 状态栏显示。
+- 鼠标移上去时自动刷新用量，并显示紧凑的毛玻璃弹窗。
+- 主体验不再使用桌面常驻浮窗。
+
 ## v0.2.0
 
 English:
