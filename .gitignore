@@ -5,3 +5,5 @@
 *.out
 *.err
 release/
+legacy-disabled/
+assets/AppIcon.iconset/

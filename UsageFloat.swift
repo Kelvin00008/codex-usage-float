@@ -16,12 +16,21 @@ struct UsageSnapshot {
     let fetchedAt: Date
 }
 
+enum AppearancePalette {
+    static var foreground: NSColor {
+        .labelColor
+    }
+}
+
 final class UsageFetcher {
-    private let codexPath = "/Applications/Codex.app/Contents/Resources/codex"
+    private let codexPathCandidates = [
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+        "/Applications/Codex.app/Contents/Resources/codex"
+    ]
 
     func fetch(completion: @escaping (Result<UsageSnapshot, Error>) -> Void) {
         DispatchQueue.global(qos: .utility).async {
-            let initRequest = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-usage-float","title":"Codex Usage Float","version":"0.3.1"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}"#
+            let initRequest = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-usage-float","title":"Codex Usage Float","version":"0.4.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}"#
             let readRequest = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read"}"#
             let input = "\(initRequest)\n\(readRequest)\n"
 
@@ -47,7 +56,7 @@ final class UsageFetcher {
         var errors: [String] = []
 
         do {
-            return try runCodexStdioWithDelay(timeout: 10)
+            return try runCodexStdioWithDelay(timeout: 20)
         } catch {
             errors.append("stdio: \(error.localizedDescription)")
         }
@@ -75,7 +84,7 @@ final class UsageFetcher {
 
     private func runCodexStdioWithDelay(timeout: TimeInterval) throws -> String {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: codexPath)
+        process.executableURL = URL(fileURLWithPath: try codexExecutablePath())
         process.arguments = ["app-server", "--listen", "stdio://"]
 
         let output = Pipe()
@@ -85,15 +94,15 @@ final class UsageFetcher {
         process.standardError = error
         process.standardInput = inputPipe
 
-        let initRequest = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-usage-float","title":"Codex Usage Float","version":"0.3.1"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}"# + "\n"
+        let initRequest = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-usage-float","title":"Codex Usage Float","version":"0.4.0"},"capabilities":{"experimentalApi":true,"requestAttestation":false}}}"# + "\n"
         let readRequest = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read"}"# + "\n"
 
         try process.run()
 
         inputPipe.fileHandleForWriting.write(Data(initRequest.utf8))
-        Thread.sleep(forTimeInterval: 0.35)
+        Thread.sleep(forTimeInterval: 0.8)
         inputPipe.fileHandleForWriting.write(Data(readRequest.utf8))
-        Thread.sleep(forTimeInterval: 4.0)
+        Thread.sleep(forTimeInterval: 15.0)
         try? inputPipe.fileHandleForWriting.close()
 
         let group = DispatchGroup()
@@ -123,7 +132,7 @@ final class UsageFetcher {
 
     private func runCodex(arguments: [String], input: String?, timeout: TimeInterval) throws -> String {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: codexPath)
+        process.executableURL = URL(fileURLWithPath: try codexExecutablePath())
         process.arguments = arguments
 
         let output = Pipe()
@@ -170,6 +179,19 @@ final class UsageFetcher {
         }
 
         return text
+    }
+
+    private func codexExecutablePath() throws -> String {
+        let manager = FileManager.default
+        if let path = codexPathCandidates.first(where: { manager.isExecutableFile(atPath: $0) }) {
+            return path
+        }
+
+        throw NSError(
+            domain: "UsageFetcher",
+            code: 4,
+            userInfo: [NSLocalizedDescriptionKey: "Codex executable not found"]
+        )
     }
 
     private static func parseSnapshot(from text: String) -> UsageSnapshot? {
@@ -246,7 +268,6 @@ final class UsageRow: NSView {
     private let nameLabel = NSTextField(labelWithString: "")
     private let percentLabel = NSTextField(labelWithString: "")
     private let resetLabel = NSTextField(labelWithString: "")
-    private let progress = ProgressBarView()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -255,9 +276,7 @@ final class UsageRow: NSView {
         nameLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         percentLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         resetLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        nameLabel.textColor = .white
-        percentLabel.textColor = .white
-        resetLabel.textColor = .white
+        applyAppearance()
         nameLabel.alignment = .center
         percentLabel.alignment = .center
         resetLabel.alignment = .center
@@ -271,10 +290,10 @@ final class UsageRow: NSView {
         percentLabel.setContentHuggingPriority(.required, for: .horizontal)
         resetLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        let stack = NSStackView(views: [top, progress])
+        let stack = NSStackView(views: [top])
         stack.orientation = .vertical
         stack.alignment = .centerX
-        stack.spacing = 6
+        stack.spacing = 0
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
@@ -282,9 +301,7 @@ final class UsageRow: NSView {
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            top.widthAnchor.constraint(equalToConstant: 156),
-            progress.widthAnchor.constraint(equalToConstant: 156),
-            progress.heightAnchor.constraint(equalToConstant: 4)
+            top.widthAnchor.constraint(equalToConstant: 156)
         ])
     }
 
@@ -292,26 +309,24 @@ final class UsageRow: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func applyAppearance() {
+        let color = AppearancePalette.foreground
+        nameLabel.textColor = color
+        percentLabel.textColor = color
+        resetLabel.textColor = color
+    }
+
     func update(with window: UsageWindow?) {
         guard let window else {
             nameLabel.stringValue = "-"
             percentLabel.stringValue = "--%"
             resetLabel.stringValue = "--:--"
-            progress.value = 0
             return
         }
 
         nameLabel.stringValue = window.label
         percentLabel.stringValue = "\(Int(round(window.remainingPercent)))%"
         resetLabel.stringValue = Self.formatReset(window.resetAt)
-        progress.value = window.remainingPercent / 100
-        progress.tint = tint(for: window.remainingPercent)
-    }
-
-    private func tint(for remaining: Double) -> NSColor {
-        if remaining <= 15 { return NSColor.systemRed }
-        if remaining <= 30 { return NSColor.systemOrange }
-        return NSColor.controlAccentColor
     }
 
     private static func formatReset(_ date: Date?) -> String {
@@ -355,7 +370,7 @@ final class ProgressBarView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let radius = bounds.height / 2
-        NSColor.labelColor.withAlphaComponent(0.12).setFill()
+        AppearancePalette.foreground.withAlphaComponent(0.14).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
 
         let width = max(bounds.height, bounds.width * value)
@@ -535,6 +550,7 @@ final class UsageViewController: NSViewController {
     private let subtitleLabel = NSTextField(labelWithString: "Loading")
     private let primaryRow = UsageRow()
     private let secondaryRow = UsageRow()
+    private var actionButtons: [NSButton] = []
     private var isRefreshing = false
     var onSnapshot: ((UsageSnapshot) -> Void)?
     var onFailure: ((Error) -> Void)?
@@ -562,8 +578,6 @@ final class UsageViewController: NSViewController {
 
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         subtitleLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        titleLabel.textColor = .white
-        subtitleLabel.textColor = .white
         titleLabel.alignment = .center
         subtitleLabel.alignment = .center
 
@@ -601,15 +615,16 @@ final class UsageViewController: NSViewController {
             primaryRow.widthAnchor.constraint(equalToConstant: 180),
             secondaryRow.widthAnchor.constraint(equalToConstant: 180)
         ])
+        applyAppearance()
     }
 
     private func iconButton(symbol: String, tooltip: String, action: Selector) -> NSButton {
         let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip) ?? NSImage(), target: self, action: action)
         button.isBordered = false
         button.bezelStyle = .regularSquare
-        button.contentTintColor = .white
         button.toolTip = tooltip
         button.translatesAutoresizingMaskIntoConstraints = false
+        actionButtons.append(button)
         NSLayoutConstraint.activate([
             button.widthAnchor.constraint(equalToConstant: 22),
             button.heightAnchor.constraint(equalToConstant: 22)
@@ -629,6 +644,16 @@ final class UsageViewController: NSViewController {
         onQuit?()
     }
 
+    func applyAppearance() {
+        let color = AppearancePalette.foreground
+        titleLabel.textColor = color
+        subtitleLabel.textColor = color
+        primaryRow.applyAppearance()
+        secondaryRow.applyAppearance()
+        actionButtons.forEach { $0.contentTintColor = color }
+        view.needsDisplay = true
+    }
+
     func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
@@ -641,6 +666,7 @@ final class UsageViewController: NSViewController {
             case .success(let snapshot):
                 self.primaryRow.update(with: snapshot.primary)
                 self.secondaryRow.update(with: snapshot.secondary)
+                self.secondaryRow.isHidden = snapshot.secondary == nil
                 self.subtitleLabel.stringValue = "\(snapshot.planType) · \(snapshot.credits)"
                 self.onSnapshot?(snapshot)
             case .failure(let error):
@@ -729,6 +755,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: 62)
     private let popover = NSPopover()
     private let controller = UsageViewController()
+    private var statusTitle = "--%"
+    private var statusRemaining: Double?
     private var closeTimer: Timer?
     private var refreshTimer: Timer?
     private var trackingArea: NSTrackingArea?
@@ -762,6 +790,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         updateStatusButton(title: "--%", warning: false)
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(appearanceChanged),
+            name: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil
+        )
         controller.refresh()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.controller.refresh()
@@ -769,13 +803,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func buildStatusItem() {
-        statusItem.length = 62
+        statusItem.length = 42
 
         if let button = statusItem.button {
             button.imagePosition = .imageOnly
             button.title = ""
             button.attributedTitle = NSAttributedString(string: "")
-            button.contentTintColor = .white
+            button.image = makeCapsuleBadge(title: "--%")
             button.toolTip = "Codex usage: hover to refresh and view details"
             button.target = self
             button.action = #selector(statusButtonPressed)
@@ -870,60 +904,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusTitle(with snapshot: UsageSnapshot) {
         let remaining = snapshot.primary?.remainingPercent ?? snapshot.secondary?.remainingPercent
         if let remaining {
-            updateStatusButton(title: "\(Int(round(remaining)))%", warning: remaining <= 30)
+            updateStatusButton(title: "\(Int(round(remaining)))%", remaining: remaining)
         } else {
-            updateStatusButton(title: "--%", warning: false)
+            updateStatusButton(title: "--%", remaining: nil)
         }
     }
 
     private func updateStatusButton(title: String, warning: Bool) {
-        let image = makeStatusImage(title: title)
-        statusItem.length = image.size.width + 8
+        updateStatusButton(title: title, remaining: statusRemaining)
+    }
+
+    private func updateStatusButton(title: String, remaining: Double?) {
+        statusTitle = title
+        statusRemaining = remaining
+        let image = makeCapsuleBadge(title: title)
+        statusItem.length = image.size.width + 6
         statusItem.button?.image = image
         statusItem.button?.title = ""
         statusItem.button?.attributedTitle = NSAttributedString(string: "")
-        statusItem.button?.contentTintColor = .white
     }
 
-    private func makeStatusImage(title: String) -> NSImage {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+    @objc private func appearanceChanged() {
+        controller.applyAppearance()
+        updateStatusButton(title: statusTitle, remaining: statusRemaining)
+    }
+
+    private func makeCapsuleBadge(title: String) -> NSImage {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .bold)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.white
+            .foregroundColor: NSColor.black
         ]
-        let titleSize = (title as NSString).size(withAttributes: attributes)
-        let width = ceil(18 + 5 + titleSize.width)
-        let size = NSSize(width: width, height: 20)
+        let textSize = (title as NSString).size(withAttributes: attributes)
+        let width = max(31, ceil(textSize.width + 10))
+        let size = NSSize(width: width, height: 15)
         let image = NSImage(size: size)
 
         image.lockFocus()
         NSColor.clear.setFill()
         NSRect(origin: .zero, size: size).fill()
 
-        let iconRect = NSRect(x: 1, y: 3, width: 14, height: 14)
-        NSColor.white.setStroke()
-        let circle = NSBezierPath(ovalIn: iconRect)
-        circle.lineWidth = 1.6
-        circle.stroke()
+        NSColor.black.setStroke()
+        NSColor.black.setFill()
 
-        NSColor.white.setFill()
-        for point in [
-            NSPoint(x: iconRect.midX - 3.2, y: iconRect.midY + 2.6),
-            NSPoint(x: iconRect.midX + 3.2, y: iconRect.midY + 2.6),
-            NSPoint(x: iconRect.midX - 3.7, y: iconRect.midY - 2.4)
-        ] {
-            NSBezierPath(ovalIn: NSRect(x: point.x - 1.1, y: point.y - 1.1, width: 2.2, height: 2.2)).fill()
-        }
+        let outlineRect = NSRect(x: 0.9, y: 1.2, width: size.width - 1.8, height: size.height - 2.4)
+        let outline = NSBezierPath(roundedRect: outlineRect, xRadius: 4.2, yRadius: 4.2)
+        outline.lineWidth = 1.25
+        outline.stroke()
 
-        let needle = NSBezierPath()
-        needle.move(to: NSPoint(x: iconRect.midX, y: iconRect.midY))
-        needle.line(to: NSPoint(x: iconRect.midX + 3.8, y: iconRect.midY - 3.4))
-        needle.lineWidth = 1.4
-        needle.stroke()
+        let textPoint = NSPoint(
+            x: (size.width - textSize.width) / 2,
+            y: (size.height - textSize.height) / 2 - 0.4
+        )
+        (title as NSString).draw(at: textPoint, withAttributes: attributes)
 
-        (title as NSString).draw(at: NSPoint(x: 20, y: 2.5), withAttributes: attributes)
         image.unlockFocus()
-        image.isTemplate = false
+        image.isTemplate = true
         return image
     }
 }

@@ -6,19 +6,20 @@ English | [中文](#中文)
 
 Codex Usage Float is a tiny macOS menu bar utility that shows your current Codex usage limits without opening the account menu.
 
-It reads the local Codex app-server method `account/rateLimits/read`, then displays the short-window and weekly-window remaining percentages with reset times. The widget refreshes every 60 seconds and does not send prompts to the model, so it does not consume model tokens.
+It reads the local Codex app-server method `account/rateLimits/read`, then displays the current remaining percentage and reset time. The widget refreshes every 60 seconds and does not send prompts to the model, so it does not consume model tokens.
 
 ![Codex Usage Float menu bar popover](assets/menu-bar-popover.png)
 
 ### Features
 
-- Always-visible macOS menu bar usage badge
-- White rendered badge for strong visibility on colorful menu bar backgrounds
+- Compact capsule badge in the macOS menu bar, with the percentage shown inside the badge
+- macOS template rendering so the badge follows the system menu bar tint automatically
 - Hover-to-refresh translucent popover with Apple-style glassmorphism
 - Stable centered popover layout that avoids jumping while refreshing
 - Icon-only popover controls for refresh, restart, and quit, with hover tooltips
-- Shows remaining usage for the primary and secondary Codex limit windows
-- Shows reset time for each window
+- Supports the current weekly-only Codex usage response
+- Hides missing limit rows instead of showing empty placeholders
+- Shows reset time for the active usage window
 - Auto-refreshes every 60 seconds without consuming model tokens
 - Optional auto-start and auto-close with Codex
 - Source-only Swift/AppKit implementation
@@ -26,7 +27,7 @@ It reads the local Codex app-server method `account/rateLimits/read`, then displ
 ### Requirements
 
 - macOS 13 or later
-- Codex desktop app installed at `/Applications/Codex.app`
+- ChatGPT/Codex desktop app installed at `/Applications/ChatGPT.app` or `/Applications/Codex.app`
 - Swift command line tools, usually included with Xcode Command Line Tools
 
 ### Build
@@ -80,19 +81,20 @@ You can also double-click `Install Auto-Start.command` in Finder.
 
 Codex Usage Float 是一个很小的 macOS 状态栏组件，用来快速查看 Codex 当前套餐/用量剩余情况，不用每次点开账户菜单。
 
-它读取 Codex 本地 app-server 的 `account/rateLimits/read` 方法，然后显示短周期窗口和周窗口的剩余百分比与重置时间。浮窗每 60 秒刷新一次，不会向模型发送 prompt，所以不会消耗模型 token。
+它读取 Codex 本地 app-server 的 `account/rateLimits/read` 方法，然后显示当前剩余百分比与重置时间。组件每 60 秒刷新一次，不会向模型发送 prompt，所以不会消耗模型 token。
 
 ![Codex Usage Float 状态栏弹窗](assets/menu-bar-popover.png)
 
 ### 功能
 
-- macOS 状态栏常驻用量徽标
-- 白色渲染徽标，在彩色菜单栏背景上更容易看清
+- macOS 状态栏紧凑胶囊徽标，百分比直接显示在徽标内部
+- 使用 macOS template 渲染，自动跟随系统菜单栏颜色变黑/白
 - 鼠标移上去自动刷新，并显示接近苹果毛玻璃风格的半透明弹窗
 - 固定居中的弹窗布局，刷新时不易跳动
 - 弹窗底部提供仅图标按钮：刷新、重启、退出，鼠标悬停显示说明
-- 显示 Codex 两个用量窗口的剩余百分比
-- 显示每个窗口的重置时间
+- 兼容当前 Codex 仅返回周用量的接口结构
+- 自动隐藏不存在的用量行，不显示空白占位
+- 显示当前用量窗口的重置时间
 - 每 60 秒自动刷新，不消耗模型 token
 - 可选：随 Codex 打开自动启动，随 Codex 退出自动关闭
 - 使用 Swift/AppKit 编写，无额外前端框架
@@ -100,7 +102,7 @@ Codex Usage Float 是一个很小的 macOS 状态栏组件，用来快速查看 
 ### 环境要求
 
 - macOS 13 或更新版本
-- Codex 桌面版安装在 `/Applications/Codex.app`
+- ChatGPT/Codex 桌面版安装在 `/Applications/ChatGPT.app` 或 `/Applications/Codex.app`
 - Swift 命令行工具，通常随 Xcode Command Line Tools 安装
 
 ### 构建

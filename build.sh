@@ -16,6 +16,10 @@ swiftc "$ROOT/UsageFloat.swift" \
   -module-cache-path "$MODULE_CACHE" \
   -o "$MACOS/UsageFloat"
 
+if [ -f "$ROOT/assets/AppIcon.icns" ]; then
+  cp "$ROOT/assets/AppIcon.icns" "$CONTENTS/Resources/AppIcon.icns"
+fi
+
 cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -30,12 +34,14 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <string>Codex Usage Float</string>
   <key>CFBundleDisplayName</key>
   <string>Codex Usage Float</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.3.1</string>
+  <string>0.4.0</string>
   <key>CFBundleVersion</key>
-  <string>4</string>
+  <string>5</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>LSUIElement</key>

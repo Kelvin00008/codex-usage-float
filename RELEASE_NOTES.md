@@ -1,5 +1,27 @@
 # Release Notes
 
+## v0.4.0
+
+English:
+
+- Updates Codex executable discovery for the new ChatGPT app bundle path.
+- Supports the new weekly-only usage response where `secondary` is absent.
+- Uses a macOS template menu bar image so the status badge follows system menu bar tint automatically.
+- Removes popover progress bars and keeps the weekly usage display text-only.
+- Replaces the previous menu bar icon with a compact capsule percentage badge to reduce status bar width.
+- Adds a real app icon resource (`AppIcon.icns`) so Finder no longer shows the default application icon.
+- Updates README with the latest v0.4.0 screenshot and current feature description.
+
+中文：
+
+- 适配新版 ChatGPT 应用包中的 Codex 可执行文件路径。
+- 兼容新版仅返回周用量、`secondary` 为空的接口结构。
+- 状态栏徽标改为 macOS template 图像，由系统自动跟随菜单栏颜色变黑/白。
+- 移除弹窗进度条，仅保留周用量文字信息。
+- 将状态栏图标改为紧凑胶囊百分比徽标，减少状态栏占位。
+- 新增真实应用图标资源（`AppIcon.icns`），避免 Finder 显示默认应用图标。
+- 更新 README 为最新 v0.4.0 截图和当前功能说明。
+
 ## v0.3.1
 
 English:
